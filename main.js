@@ -127,27 +127,38 @@
         }
     };
 
-    // ─── 3D Network Background (Canvas) ──────────────────
+    // ─── 3D Rotating Mesh Background (Canvas) ────────────
     const Network3D = {
         canvas: null,
         ctx: null,
         nodes: [],
         edges: [],
+        packets: [],
         width: 0,
         height: 0,
-        mouse: { x: 0, y: 0 },
-        nodeCount: 80,
-        connectionDist: 150,
+        mouse: { x: 0, y: 0, active: false },
         animId: null,
         time: 0,
+        rotationSpeed: 0.002,
+        rotX: 0,
+        rotY: 0,
+        rotZ: 0,
+        // Mesh parameters
+        rings: 12,
+        segments: 20,
+        radius: 250,
+        depth: 120,
+        // Visual parameters
+        connectionDist: 180,
+        glowIntensity: 0.6,
 
         init() {
             this.canvas = document.getElementById('bg-canvas');
             if (!this.canvas) return;
             this.ctx = this.canvas.getContext('2d');
             this.resize();
-            this.createNodes();
-            this.createEdges();
+            this.buildMesh();
+            this.spawnPackets();
             this.bindEvents();
             this.animate();
         },
@@ -157,171 +168,260 @@
             this.height = window.innerHeight;
             this.canvas.width = this.width;
             this.canvas.height = this.height;
+            this.radius = Math.min(this.width, this.height) * 0.35;
+            this.buildMesh();
         },
 
-        createNodes() {
+        buildMesh() {
             this.nodes = [];
-            for (let i = 0; i < this.nodeCount; i++) {
-                this.nodes.push({
-                    x: Math.random() * this.width,
-                    y: Math.random() * this.height,
-                    z: Math.random() * 300,
-                    vx: (Math.random() - 0.5) * 0.5,
-                    vy: (Math.random() - 0.5) * 0.5,
-                    vz: (Math.random() - 0.5) * 0.3,
-                    radius: Math.random() * 2 + 1,
-                    pulse: Math.random() * Math.PI * 2,
-                    pulseSpeed: Math.random() * 0.02 + 0.01,
-                });
+            this.edges = [];
+
+            // Create a toroidal mesh — nodes arranged in rings
+            for (let r = 0; r < this.rings; r++) {
+                const ringAngle = (r / this.rings) * Math.PI * 2;
+                const ringRadius = this.radius * (0.6 + 0.4 * Math.sin(ringAngle * 0.5));
+                for (let s = 0; s < this.segments; s++) {
+                    const segAngle = (s / this.segments) * Math.PI * 2;
+                    const x = Math.cos(segAngle) * ringRadius;
+                    const y = Math.sin(segAngle) * ringRadius * 0.6; // Flatten vertically
+                    const z = Math.sin(ringAngle) * this.depth;
+                    this.nodes.push({
+                        ox: x, oy: y, oz: z, // Original positions
+                        x: 0, y: 0, z: 0,     // Transformed positions
+                        ring: r,
+                        seg: s,
+                        pulse: Math.random() * Math.PI * 2,
+                        pulseSpeed: 0.015 + Math.random() * 0.02,
+                        radius: 1 + Math.random() * 1.5,
+                    });
+                }
+            }
+
+            // Create edges between nearby nodes
+            for (let i = 0; i < this.nodes.length; i++) {
+                for (let j = i + 1; j < this.nodes.length; j++) {
+                    const a = this.nodes[i];
+                    const b = this.nodes[j];
+                    const dx = a.ox - b.ox;
+                    const dy = a.oy - b.oy;
+                    const dz = a.oz - b.oz;
+                    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    if (dist < this.connectionDist) {
+                        this.edges.push({ a: i, b: j, dist, distNorm: dist / this.connectionDist });
+                    }
+                }
             }
         },
 
-        createEdges() {
-            this.edges = [];
-            for (let i = 0; i < this.nodes.length; i++) {
-                for (let j = i + 1; j < this.nodes.length; j++) {
-                    const dx = this.nodes[i].x - this.nodes[j].x;
-                    const dy = this.nodes[i].y - this.nodes[j].y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < this.connectionDist) {
-                        this.edges.push({ a: i, b: j, dist });
-                    }
-                }
+        spawnPackets() {
+            this.packets = [];
+            for (let i = 0; i < 15; i++) {
+                const edgeIdx = Math.floor(Math.random() * this.edges.length);
+                this.packets.push({
+                    edge: edgeIdx,
+                    t: Math.random(),
+                    speed: 0.003 + Math.random() * 0.005,
+                    size: 2 + Math.random() * 3,
+                });
             }
         },
 
         bindEvents() {
             window.addEventListener('resize', () => {
                 this.resize();
-                this.createNodes();
-                this.createEdges();
+                this.spawnPackets();
             });
             window.addEventListener('mousemove', (e) => {
                 this.mouse.x = e.clientX;
                 this.mouse.y = e.clientY;
+                this.mouse.active = true;
+            });
+            window.addEventListener('mouseleave', () => {
+                this.mouse.active = false;
             });
         },
 
+        rotatePoint(x, y, z) {
+            // Rotate around Y axis
+            let cosY = Math.cos(this.rotY);
+            let sinY = Math.sin(this.rotY);
+            let x1 = x * cosY - z * sinY;
+            let z1 = x * sinY + z * cosY;
+
+            // Rotate around X axis
+            let cosX = Math.cos(this.rotX);
+            let sinX = Math.sin(this.rotX);
+            let y1 = y * cosX - z1 * sinX;
+            let z2 = y * sinX + z1 * cosX;
+
+            // Rotate around Z axis
+            let cosZ = Math.cos(this.rotZ);
+            let sinZ = Math.sin(this.rotZ);
+            let x2 = x1 * cosZ - y1 * sinZ;
+            let y2 = x1 * sinZ + y1 * cosZ;
+
+            return { x: x2, y: y2, z: z2 };
+        },
+
         project(x, y, z) {
-            const perspective = 800;
-            const scale = perspective / (perspective + z);
+            const perspective = 600;
+            const zOffset = 400;
+            const scale = perspective / (perspective + z + zOffset);
             return {
-                x: (x - this.width / 2) * scale + this.width / 2,
-                y: (y - this.height / 2) * scale + this.height / 2,
-                scale
+                x: x * scale + this.width / 2,
+                y: y * scale + this.height / 2,
+                scale: scale,
+                z: z,
             };
+        },
+
+        getColor() {
+            const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+            if (isDark) {
+                return { r: 0, g: 212, b: 255, alt: { r: 123, g: 47, b: 247 } };
+            }
+            return { r: 0, g: 136, b: 204, alt: { r: 106, g: 27, b: 212 } };
         },
 
         animate() {
             this.time += 0.016;
-            this.ctx.clearRect(0, 0, this.width, this.height);
 
-            // Update nodes
-            for (const node of this.nodes) {
-                node.x += node.vx;
-                node.y += node.vy;
-                node.z += node.vz;
-                node.pulse += node.pulseSpeed;
+            // Update rotation — auto-rotate + mouse influence
+            this.rotY += this.rotationSpeed;
+            this.rotX = Math.sin(this.time * 0.3) * 0.2;
+            this.rotZ = Math.cos(this.time * 0.2) * 0.1;
 
-                // Bounce off edges
-                if (node.x < 0 || node.x > this.width) node.vx *= -1;
-                if (node.y < 0 || node.y > this.height) node.vy *= -1;
-                if (node.z < 0 || node.z > 300) node.vz *= -1;
-
-                // Mouse interaction
-                const dx = this.mouse.x - node.x;
-                const dy = this.mouse.y - node.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 200) {
-                    const force = (200 - dist) / 200 * 0.02;
-                    node.vx -= dx * force * 0.01;
-                    node.vy -= dy * force * 0.01;
-                }
-
-                // Damping
-                node.vx *= 0.999;
-                node.vy *= 0.999;
+            if (this.mouse.active) {
+                const mx = (this.mouse.x - this.width / 2) / this.width;
+                const my = (this.mouse.y - this.height / 2) / this.height;
+                this.rotY += mx * 0.005;
+                this.rotX += my * 0.003;
             }
 
-            // Draw edges
-            const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
-            const baseColor = isDark ? '0, 212, 255' : '0, 136, 204';
+            this.ctx.clearRect(0, 0, this.width, this.height);
 
+            const color = this.getColor();
+            const baseColor = `${color.r}, ${color.g}, ${color.b}`;
+            const altColor = `${color.alt.r}, ${color.alt.g}, ${color.alt.b}`;
+
+            // Transform all nodes
+            for (const node of this.nodes) {
+                const rotated = this.rotatePoint(node.ox, node.oy, node.oz);
+                // Add wave distortion
+                const wave = Math.sin(this.time * 2 + node.ring * 0.5) * 15;
+                node.x = rotated.x;
+                node.y = rotated.y + wave;
+                node.z = rotated.z;
+                node.pulse += node.pulseSpeed;
+            }
+
+            // Project all nodes
+            const projected = this.nodes.map(n => this.project(n.x, n.y, n.z));
+
+            // Draw edges with depth-based opacity
             for (const edge of this.edges) {
-                const a = this.nodes[edge.a];
-                const b = this.nodes[edge.b];
-                const pa = this.project(a.x, a.y, a.z);
-                const pb = this.project(b.x, b.y, b.z);
+                const pa = projected[edge.a];
+                const pb = projected[edge.b];
+                const avgZ = (this.nodes[edge.a].z + this.nodes[edge.b].z) / 2;
+                const depthFade = Math.max(0.05, 1 - (avgZ + this.depth) / (this.depth * 2));
 
-                const dx = pa.x - pb.x;
-                const dy = pa.y - pb.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                const opacity = Math.max(0, 1 - dist / this.connectionDist) * 0.3;
+                // Gradient along edge
+                const gradient = this.ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
+                const nodeA = this.nodes[edge.a];
+                const nodeB = this.nodes[edge.b];
+                const pulseA = Math.sin(nodeA.pulse) * 0.3 + 0.7;
+                const pulseB = Math.sin(nodeB.pulse) * 0.3 + 0.7;
+
+                gradient.addColorStop(0, `rgba(${baseColor}, ${depthFade * 0.15 * pulseA})`);
+                gradient.addColorStop(0.5, `rgba(${altColor}, ${depthFade * 0.1 * (pulseA + pulseB) / 2})`);
+                gradient.addColorStop(1, `rgba(${baseColor}, ${depthFade * 0.15 * pulseB})`);
 
                 this.ctx.beginPath();
                 this.ctx.moveTo(pa.x, pa.y);
                 this.ctx.lineTo(pb.x, pb.y);
-                this.ctx.strokeStyle = `rgba(${baseColor}, ${opacity})`;
-                this.ctx.lineWidth = 0.5 * pa.scale;
+                this.ctx.strokeStyle = gradient;
+                this.ctx.lineWidth = Math.max(0.3, 1 * pa.scale * (1 - edge.distNorm * 0.5));
                 this.ctx.stroke();
             }
 
-            // Draw nodes
-            for (const node of this.nodes) {
-                const p = this.project(node.x, node.y, node.z);
-                const pulseFactor = Math.sin(node.pulse) * 0.3 + 0.7;
-                const radius = node.radius * p.scale * pulseFactor;
+            // Draw nodes sorted by depth (back to front)
+            const sortedIndices = this.nodes
+                .map((n, i) => ({ i, z: n.z }))
+                .sort((a, b) => b.z - a.z);
 
-                // Glow
-                const gradient = this.ctx.createRadialGradient(
-                    p.x, p.y, 0,
-                    p.x, p.y, radius * 4
-                );
-                gradient.addColorStop(0, `rgba(${baseColor}, ${0.4 * p.scale})`);
-                gradient.addColorStop(1, `rgba(${baseColor}, 0)`);
+            for (const { i } of sortedIndices) {
+                const node = this.nodes[i];
+                const p = projected[i];
+                const pulseFactor = Math.sin(node.pulse) * 0.4 + 0.6;
+                const radius = node.radius * p.scale * pulseFactor;
+                const depthFade = Math.max(0.1, 1 - (node.z + this.depth) / (this.depth * 2));
+
+                // Outer glow
+                const glowRadius = radius * 6;
+                const glow = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
+                glow.addColorStop(0, `rgba(${baseColor}, ${0.3 * depthFade * pulseFactor})`);
+                glow.addColorStop(0.5, `rgba(${altColor}, ${0.1 * depthFade * pulseFactor})`);
+                glow.addColorStop(1, `rgba(${baseColor}, 0)`);
                 this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, radius * 4, 0, Math.PI * 2);
-                this.ctx.fillStyle = gradient;
+                this.ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
+                this.ctx.fillStyle = glow;
                 this.ctx.fill();
 
-                // Core
+                // Core dot
                 this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
-                this.ctx.fillStyle = `rgba(${baseColor}, ${0.8 * p.scale})`;
+                this.ctx.arc(p.x, p.y, Math.max(0.5, radius), 0, Math.PI * 2);
+                this.ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * depthFade * pulseFactor})`;
                 this.ctx.fill();
             }
 
-            // Draw data streams (animated lines)
-            this.drawDataStreams();
+            // Draw animated data packets
+            this.drawPackets(projected, color);
 
             this.animId = requestAnimationFrame(() => this.animate());
         },
 
-        drawDataStreams() {
-            const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
-            const baseColor = isDark ? '0, 212, 255' : '0, 136, 204';
+        drawPackets(projected, color) {
+            for (const packet of this.packets) {
+                packet.t += packet.speed;
+                if (packet.t > 1) {
+                    packet.t = 0;
+                    packet.edge = Math.floor(Math.random() * this.edges.length);
+                }
 
-            // Animate a few "data packets" along edges
-            for (let i = 0; i < 5; i++) {
-                const edgeIdx = Math.floor((this.time * 10 + i * 37) % this.edges.length);
-                const edge = this.edges[edgeIdx];
-                if (!edge) continue;
+                const edge = this.edges[packet.edge];
+                const pa = projected[edge.a];
+                const pb = projected[edge.b];
 
-                const a = this.nodes[edge.a];
-                const b = this.nodes[edge.b];
-                const pa = this.project(a.x, a.y, a.z);
-                const pb = this.project(b.x, b.y, b.z);
+                // Interpolate position
+                const x = pa.x + (pb.x - pa.x) * packet.t;
+                const y = pa.y + (pb.y - pa.y) * packet.t;
+                const avgScale = (pa.scale + pb.scale) / 2;
+                const size = packet.size * avgScale;
 
-                const t = ((this.time * 2 + i * 0.2) % 1);
-                const x = pa.x + (pb.x - pa.x) * t;
-                const y = pa.y + (pb.y - pa.y) * t;
+                // Trail effect
+                const trailLen = 0.08;
+                const tx = pa.x + (pb.x - pa.x) * Math.max(0, packet.t - trailLen);
+                const ty = pa.y + (pb.y - pa.y) * Math.max(0, packet.t - trailLen);
 
-                const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, 8);
-                gradient.addColorStop(0, `rgba(${baseColor}, 0.8)`);
-                gradient.addColorStop(1, `rgba(${baseColor}, 0)`);
+                const trail = this.ctx.createLinearGradient(tx, ty, x, y);
+                trail.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+                trail.addColorStop(1, `rgba(255, 255, 255, 0.8)`);
+
                 this.ctx.beginPath();
-                this.ctx.arc(x, y, 8, 0, Math.PI * 2);
-                this.ctx.fillStyle = gradient;
+                this.ctx.moveTo(tx, ty);
+                this.ctx.lineTo(x, y);
+                this.ctx.strokeStyle = trail;
+                this.ctx.lineWidth = size * 0.5;
+                this.ctx.stroke();
+
+                // Bright head
+                const headGlow = this.ctx.createRadialGradient(x, y, 0, x, y, size * 3);
+                headGlow.addColorStop(0, `rgba(255, 255, 255, 0.9)`);
+                headGlow.addColorStop(0.3, `rgba(${color.r}, ${color.g}, ${color.b}, 0.5)`);
+                headGlow.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+                this.ctx.beginPath();
+                this.ctx.arc(x, y, size * 3, 0, Math.PI * 2);
+                this.ctx.fillStyle = headGlow;
                 this.ctx.fill();
             }
         }
