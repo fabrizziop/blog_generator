@@ -108,7 +108,7 @@
     // ─── Floating Particles ──────────────────────────────
     const Particles = {
         container: null,
-        count: 30,
+        count: 120,
         init() {
             this.container = document.getElementById('particles');
             if (!this.container) return;
@@ -120,9 +120,9 @@
             const p = document.createElement('div');
             p.className = 'particle';
             p.style.left = Math.random() * 100 + '%';
-            p.style.animationDuration = (Math.random() * 15 + 10) + 's';
-            p.style.animationDelay = (Math.random() * 10) + 's';
-            p.style.width = p.style.height = (Math.random() * 3 + 1) + 'px';
+            p.style.animationDuration = (Math.random() * 20 + 8) + 's';
+            p.style.animationDelay = (Math.random() * 20) + 's';
+            p.style.width = p.style.height = (Math.random() * 4 + 1) + 'px';
             this.container.appendChild(p);
         }
     };
@@ -149,7 +149,7 @@
         radius: 250,
         depth: 120,
         // Visual parameters
-        connectionDist: 180,
+        connectionDist: 300,
         glowIntensity: 0.6,
 
         init() {
@@ -168,7 +168,8 @@
             this.height = window.innerHeight;
             this.canvas.width = this.width;
             this.canvas.height = this.height;
-            this.radius = Math.min(this.width, this.height) * 0.35;
+            this.radius = Math.max(this.width, this.height) * 0.6;
+            this.depth = this.radius * 0.4;
             this.buildMesh();
         },
 
@@ -264,8 +265,8 @@
         },
 
         project(x, y, z) {
-            const perspective = 600;
-            const zOffset = 400;
+            const perspective = 1200;
+            const zOffset = 800;
             const scale = perspective / (perspective + z + zOffset);
             return {
                 x: x * scale + this.width / 2,
