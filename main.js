@@ -293,7 +293,7 @@
             if (isDark) {
                 return { r: 0, g: 212, b: 255, alt: { r: 123, g: 47, b: 247 } };
             }
-            return { r: 0, g: 136, b: 204, alt: { r: 106, g: 27, b: 212 } };
+            return { r: 0, g: 100, b: 180, alt: { r: 80, g: 20, b: 160 } };
         },
 
         animate() {
@@ -322,6 +322,7 @@
 
             this.ctx.clearRect(0, 0, this.width, this.height);
 
+            const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
             const color = this.getColor();
             const baseColor = `${color.r}, ${color.g}, ${color.b}`;
             const altColor = `${color.alt.r}, ${color.alt.g}, ${color.alt.b}`;
@@ -377,9 +378,13 @@
                 const pulseA = Math.sin(nodeA.pulse) * 0.3 + 0.7;
                 const pulseB = Math.sin(nodeB.pulse) * 0.3 + 0.7;
 
-                gradient.addColorStop(0, `rgba(${baseColor}, ${depthFade * 0.15 * pulseA})`);
-                gradient.addColorStop(0.5, `rgba(${altColor}, ${depthFade * 0.1 * (pulseA + pulseB) / 2})`);
-                gradient.addColorStop(1, `rgba(${baseColor}, ${depthFade * 0.15 * pulseB})`);
+                // Boost opacity in light theme
+                const edgeMult = isDark ? 0.15 : 0.3;
+                const midMult = isDark ? 0.1 : 0.2;
+
+                gradient.addColorStop(0, `rgba(${baseColor}, ${depthFade * edgeMult * pulseA})`);
+                gradient.addColorStop(0.5, `rgba(${altColor}, ${depthFade * midMult * (pulseA + pulseB) / 2})`);
+                gradient.addColorStop(1, `rgba(${baseColor}, ${depthFade * edgeMult * pulseB})`);
 
                 this.ctx.beginPath();
                 this.ctx.moveTo(pa.x, pa.y);
