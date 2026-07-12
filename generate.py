@@ -594,6 +594,8 @@ def main(args=None):
     if assets_dir.exists():
         print('Copying assets...')
         shutil.copytree(assets_dir, output / 'assets')
+        # Ensure assets directory is world-readable (fixes 403 on web servers)
+        os.chmod(output / 'assets', 0o755)
 
     # Copy favicon to expected location
     favicon_src = assets_dir / 'img' / 'favicons' / 'favicon.ico'
