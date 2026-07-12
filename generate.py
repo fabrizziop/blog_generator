@@ -664,6 +664,55 @@ def main(args=None):
             generate_tag_page(tag, tag_posts, config), encoding='utf-8'
         )
 
+    # Generate robots.txt
+    print('Generating robots.txt...')
+    site_url = config.get('url', '').rstrip('/')
+    (output / 'robots.txt').write_text(
+        f'User-agent: *\n\n'
+        f'Disallow: /norobots/\n\n'
+        f'Sitemap: {site_url}/sitemap.xml\n',
+        encoding='utf-8',
+    )
+
+    # Generate llms.txt
+    print('Generating llms.txt...')
+    site_title = config.get('title', '')
+    site_tagline = config.get('tagline', '')
+    llms_lines = [
+        f'# {site_title}',
+        f'',
+        f'{site_tagline}',
+        f'',
+        f'{len(posts)} posts covering networking topics.',
+        f'',
+        f'## Navigation',
+        f'',
+    ]
+    # List all pages with brief descriptions
+    page_descriptions = [
+        ('/', 'Home page with latest posts'),
+        ('/archives/', 'Chronological post archive'),
+        ('/categories/', 'Posts grouped by category'),
+        ('/tags/', 'Posts grouped by tag'),
+        ('/about/', 'About the author'),
+        ('/peering/', 'Peering information'),
+        ('/graphs/', 'Network graphs'),
+    ]
+    for path, desc in page_descriptions:
+        llms_lines.append(f'- [{desc}]({site_url}{path})')
+    llms_lines.append('')
+    llms_lines.append('## Posts')
+    llms_lines.append('')
+    for p in posts:
+        llms_lines.append(
+            f'- [{p.get("title", p["slug"])}]({site_url}/posts/{p["slug"]}/) '
+            f'({p["date_str"]})'
+        )
+    llms_lines.append('')
+    (output / 'llms.txt').write_text(
+        '\n'.join(llms_lines), encoding='utf-8',
+    )
+
     print(f'\nDone! Site generated at: {output}')
 
     # Optional local server
