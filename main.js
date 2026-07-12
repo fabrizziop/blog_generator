@@ -137,9 +137,12 @@
         width: 0,
         height: 0,
         mouse: { x: 0, y: 0, active: false },
+        targetRotX: 0,
+        targetRotY: 0,
+        targetRotZ: 0,
         animId: null,
         time: 0,
-        rotationSpeed: 0.002,
+        rotationSpeed: 0.001,
         rotX: 0,
         rotY: 0,
         rotZ: 0,
@@ -236,9 +239,18 @@
                 this.mouse.x = e.clientX;
                 this.mouse.y = e.clientY;
                 this.mouse.active = true;
+                // Strong mouse influence — mesh tilts toward cursor
+                const mx = (e.clientX - this.width / 2) / (this.width / 2);
+                const my = (e.clientY - this.height / 2) / (this.height / 2);
+                this.targetRotY = mx * 0.8;
+                this.targetRotX = my * 0.5;
+                this.targetRotZ = mx * 0.2;
             });
             window.addEventListener('mouseleave', () => {
                 this.mouse.active = false;
+                this.targetRotX = 0;
+                this.targetRotY = 0;
+                this.targetRotZ = 0;
             });
         },
 
@@ -287,23 +299,36 @@
         animate() {
             this.time += 0.016;
 
-            // Update rotation — auto-rotate + mouse influence
+            // Auto-rotation (slow, ambient)
             this.rotY += this.rotationSpeed;
-            this.rotX = Math.sin(this.time * 0.3) * 0.2;
-            this.rotZ = Math.cos(this.time * 0.2) * 0.1;
 
-            if (this.mouse.active) {
-                const mx = (this.mouse.x - this.width / 2) / this.width;
-                const my = (this.mouse.y - this.height / 2) / this.height;
-                this.rotY += mx * 0.005;
-                this.rotX += my * 0.003;
-            }
+            // Smooth easing toward mouse-driven targets
+            const ease = 0.04;
+            this.rotX += (this.targetRotX - this.rotX) * ease;
+            this.rotY += (this.targetRotY - this.rotY) * ease - this.rotationSpeed;
+            this.rotZ += (this.targetRotZ - this.rotZ) * ease;
+
+            // Add gentle ambient oscillation on top
+            const ambientX = Math.sin(this.time * 0.3) * 0.15;
+            const ambientZ = Math.cos(this.time * 0.2) * 0.08;
+            const finalRotX = this.rotX + ambientX;
+            const finalRotZ = this.rotZ + ambientZ;
+
+            // Temporarily swap rotation values for transform
+            const savedRotX = this.rotX;
+            const savedRotZ = this.rotZ;
+            this.rotX = finalRotX;
+            this.rotZ = finalRotZ;
 
             this.ctx.clearRect(0, 0, this.width, this.height);
 
             const color = this.getColor();
             const baseColor = `${color.r}, ${color.g}, ${color.b}`;
             const altColor = `${color.alt.r}, ${color.alt.g}, ${color.alt.b}`;
+
+            // Mouse normalized position for node displacement
+            const mouseNX = this.mouse.x / this.width;
+            const mouseNY = this.mouse.y / this.height;
 
             // Transform all nodes
             for (const node of this.nodes) {
@@ -318,6 +343,25 @@
 
             // Project all nodes
             const projected = this.nodes.map(n => this.project(n.x, n.y, n.z));
+
+            // Mouse-reactive node displacement
+            if (this.mouse.active) {
+                for (let i = 0; i < projected.length; i++) {
+                    const p = projected[i];
+                    const dx = p.x - this.mouse.x;
+                    const dy = p.y - this.mouse.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const influenceRadius = 200;
+                    if (dist < influenceRadius) {
+                        const force = (1 - dist / influenceRadius) * 30;
+                        const angle = Math.atan2(dy, dx);
+                        p.x += Math.cos(angle) * force;
+                        p.y += Math.sin(angle) * force;
+                        // Boost pulse near mouse
+                        this.nodes[i].pulse += 0.1;
+                    }
+                }
+            }
 
             // Draw edges with depth-based opacity
             for (const edge of this.edges) {
@@ -377,6 +421,10 @@
 
             // Draw animated data packets
             this.drawPackets(projected, color);
+
+            // Restore rotation values
+            this.rotX = savedRotX;
+            this.rotZ = savedRotZ;
 
             this.animId = requestAnimationFrame(() => this.animate());
         },
