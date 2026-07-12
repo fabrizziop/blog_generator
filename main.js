@@ -293,7 +293,7 @@
             if (isDark) {
                 return { r: 0, g: 212, b: 255, alt: { r: 123, g: 47, b: 247 } };
             }
-            return { r: 0, g: 100, b: 180, alt: { r: 80, g: 20, b: 160 } };
+            return { r: 0, g: 60, b: 120, alt: { r: 50, g: 10, b: 120 } };
         },
 
         animate() {
@@ -379,8 +379,8 @@
                 const pulseB = Math.sin(nodeB.pulse) * 0.3 + 0.7;
 
                 // Boost opacity in light theme
-                const edgeMult = isDark ? 0.15 : 0.3;
-                const midMult = isDark ? 0.1 : 0.2;
+                const edgeMult = isDark ? 0.15 : 0.5;
+                const midMult = isDark ? 0.1 : 0.35;
 
                 gradient.addColorStop(0, `rgba(${baseColor}, ${depthFade * edgeMult * pulseA})`);
                 gradient.addColorStop(0.5, `rgba(${altColor}, ${depthFade * midMult * (pulseA + pulseB) / 2})`);
@@ -409,8 +409,9 @@
                 // Outer glow
                 const glowRadius = radius * 6;
                 const glow = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
-                glow.addColorStop(0, `rgba(${baseColor}, ${0.3 * depthFade * pulseFactor})`);
-                glow.addColorStop(0.5, `rgba(${altColor}, ${0.1 * depthFade * pulseFactor})`);
+                const glowMult = isDark ? 1 : 1.5;
+                glow.addColorStop(0, `rgba(${baseColor}, ${0.3 * glowMult * depthFade * pulseFactor})`);
+                glow.addColorStop(0.5, `rgba(${altColor}, ${0.1 * glowMult * depthFade * pulseFactor})`);
                 glow.addColorStop(1, `rgba(${baseColor}, 0)`);
                 this.ctx.beginPath();
                 this.ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
