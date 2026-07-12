@@ -440,6 +440,21 @@ img {
     62% { transform: skew(0deg); }
 }
 
+.hero-logo {
+    width: 120px;
+    height: 120px;
+    object-fit: contain;
+    margin-bottom: 1.5rem;
+    border-radius: 50%;
+    box-shadow: var(--shadow-glow);
+    transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.hero-logo:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 50px var(--accent-glow);
+}
+
 .hero-tagline {
     font-size: 1.2rem;
     color: var(--text-secondary);
@@ -983,6 +998,52 @@ img {
 .cat-count {
     font-size: 0.85rem;
     color: var(--text-muted);
+}
+
+/* ─── Category detail page ─────────────────────────────── */
+.category-intro {
+    color: var(--text-secondary);
+    margin-bottom: 2rem;
+    font-size: 1rem;
+}
+
+.category-posts-list {
+    display: grid;
+    gap: 1rem;
+}
+
+.category-post-item {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: var(--bg-glass);
+    border: 1px solid var(--border-glass);
+    border-radius: var(--radius-sm);
+    transition: all var(--transition);
+}
+
+.category-post-item:hover {
+    border-color: var(--accent);
+    transform: translateX(4px);
+    box-shadow: var(--shadow-glow);
+}
+
+.category-post-date {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-family: var(--font-mono);
+}
+
+.category-post-title {
+    color: var(--text-primary);
+    font-size: 1.05rem;
+    font-weight: 500;
+}
+
+.category-post-title:hover {
+    color: var(--accent);
 }
 
 /* ─── Tag Cloud ─────────────────────────────────────────── */

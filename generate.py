@@ -244,7 +244,7 @@ def generate_post_page(post, config):
     slug = post['slug']
     title = post.get('title', slug)
     cats = ' &middot; '.join(
-        f'<a href="/categories/?cat={c}" class="category-link">{c}</a>'
+        f'<a href="/categories/{re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-")}/" class="category-link">{c}</a>'
         for c in post.get('categories', [])
     )
     tags = ' '.join(
@@ -289,7 +289,7 @@ def generate_index(posts, config, tabs):
         first_para = p['body'].strip().split('\n\n')[0]
         excerpt = (first_para[:200] + '...') if len(first_para) > 200 else first_para
         cats = ' &middot; '.join(
-            f'<a href="/categories/?cat={c}" class="category-link">{c}</a>'
+            f'<a href="/categories/{re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-")}/" class="category-link">{c}</a>'
             for c in p.get('categories', [])
         )
         post_cards += f"""
@@ -312,9 +312,15 @@ def generate_index(posts, config, tabs):
     cats_count = len(collect_categories(posts))
     tags_count = len(collect_tags(posts))
 
+    avatar = config.get('avatar', '')
+    logo_html = ''
+    if avatar:
+        logo_html = f'<img src="{avatar}" alt="{config["title"]} logo" class="hero-logo">'
+
     main = f"""    <main class="container">
         <header class="hero">
             <div class="hero-content">
+                {logo_html}
                 <h1 class="hero-title glitch"
                     data-text="{config['title']}">{config['title']}</h1>
                 <p class="hero-tagline">{config.get('tagline', '')}</p>
@@ -372,9 +378,10 @@ def generate_tab_page(tab, posts, config):
         cats = collect_categories(posts)
         cat_html = '<div class="categories-grid">'
         for cat, cat_posts in sorted(cats.items()):
+            cat_slug = re.sub(r'[^a-z0-9]+', '-', cat.lower()).strip('-')
             cat_html += (
                 f'<div class="category-card">'
-                f'<h3><a href="/categories/?cat={cat}">{cat}</a></h3>'
+                f'<h3><a href="/categories/{cat_slug}/">{cat}</a></h3>'
                 f'<span class="cat-count">{len(cat_posts)} posts</span>'
                 f'</div>'
             )
@@ -407,6 +414,37 @@ def generate_tab_page(tab, posts, config):
     full = full.replace(
         f"<title>{config['title']} | {config.get('tagline', '')}</title>",
         f"<title>{title} | {config['title']}</title>",
+        1,
+    )
+    return full
+
+# ─── Generate category page ─────────────────────────────
+def generate_category_page(cat_name, cat_posts, config):
+    """Generate a page listing posts for a specific category."""
+    post_list_html = ''
+    for p in cat_posts:
+        post_list_html += f"""
+        <div class="category-post-item">
+            <span class="category-post-date">{p['date_display']}</span>
+            <a href="/posts/{p['slug']}/" class="category-post-title">{p.get('title', p['slug'])}</a>
+        </div>"""
+
+    main = f"""    <main class="container">
+        <div class="page">
+            <h1 class="page-title">Category: {cat_name}</h1>
+            <div class="page-content">
+                <p class="category-intro">{len(cat_posts)} posts in this category</p>
+                <div class="category-posts-list">{post_list_html}
+                </div>
+                <a href="/categories/" class="back-link">&larr; Back to categories</a>
+            </div>
+        </div>
+    </main>"""
+
+    full = _shell(config, main, 'tab')
+    full = full.replace(
+        f"<title>{config['title']} | {config.get('tagline', '')}</title>",
+        f"<title>{cat_name} | {config['title']}</title>",
         1,
     )
     return full
@@ -521,6 +559,17 @@ def main(args=None):
         tab_dir.mkdir(parents=True, exist_ok=True)
         (tab_dir / 'index.html').write_text(
             generate_tab_page(t, posts, config), encoding='utf-8'
+        )
+
+    # Generate category pages
+    print('Generating category pages...')
+    cats = collect_categories(posts)
+    for cat, cat_posts in cats.items():
+        cat_slug = re.sub(r'[^a-z0-9]+', '-', cat.lower()).strip('-')
+        cat_page_dir = output / 'categories' / cat_slug
+        cat_page_dir.mkdir(parents=True, exist_ok=True)
+        (cat_page_dir / 'index.html').write_text(
+            generate_category_page(cat, cat_posts, config), encoding='utf-8'
         )
 
     print(f'\nDone! Site generated at: {output}')
