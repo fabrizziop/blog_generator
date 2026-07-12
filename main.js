@@ -15,7 +15,7 @@
             localStorage.setItem('theme', val);
             document.documentElement.setAttribute('data-theme', val);
             const icon = document.querySelector('.theme-icon');
-            if (icon) icon.textContent = val === 'dark' ? '☀' : '🌙';
+            if (icon) icon.textContent = val === 'dark' ? '🌞' : '🌙';
         },
         toggle() {
             this.set(this.get() === 'dark' ? 'light' : 'dark');
@@ -597,6 +597,9 @@
     function init() {
         // Apply saved theme
         Theme.set(Theme.get());
+
+        // Theme toggle button
+        document.getElementById('themeToggle')?.addEventListener('click', () => Theme.toggle());
 
         // Initialize components
         Sidebar.init();
