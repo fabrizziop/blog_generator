@@ -183,10 +183,15 @@ def _sidebar(config, active_page=None):
     nav = _nav_links(active_page)
     gh = config.get('github', {}).get('username', '')
     tw = config.get('twitter', {}).get('username', '')
+    avatar = config.get('avatar', '')
+    logo_html = ''
+    if avatar:
+        logo_html = f'<img src="{avatar}" alt="{config["title"]} logo" class="nav-logo">'
     return f"""    <nav id="sidebar">
         <div class="nav-overlay" id="navOverlay"></div>
         <div class="nav-content">
             <div class="nav-header">
+                {logo_html}
                 <h1 class="site-title">{config['title']}</h1>
                 <p class="site-tagline">{config.get('tagline', '')}</p>
             </div>
