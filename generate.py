@@ -525,6 +525,12 @@ def main(args=None):
         print('Copying assets...')
         shutil.copytree(assets_dir, output / 'assets')
 
+    # Copy favicon to expected location
+    favicon_src = assets_dir / 'img' / 'favicons' / 'favicon.ico'
+    if favicon_src.exists():
+        (output / 'assets' / 'img').mkdir(parents=True, exist_ok=True)
+        shutil.copy2(favicon_src, output / 'assets' / 'img' / 'favicon.ico')
+
     # Generate CSS/JS from template files
     print('Generating CSS...')
     css_src = Path(__file__).parent / 'style.css'
