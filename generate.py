@@ -157,6 +157,42 @@ def collect_tags(posts):
             tags.setdefault(t, []).append(p)
     return tags
 
+# ─── Clean markdown for excerpts ────────────────────────
+def clean_excerpt(text, max_len=200):
+    """Clean raw markdown for use as a post excerpt.
+
+    Strips headers, cleans links to show only text, removes
+    code blocks, and truncates to max_len.
+    """
+    lines = text.split('\n')
+    cleaned = []
+    for line in lines:
+        # Skip headers
+        if re.match(r'^#+\s', line):
+            continue
+        # Skip horizontal rules
+        if re.match(r'^---+\s*$', line):
+            continue
+        cleaned.append(line)
+
+    result = ' '.join(cleaned)
+
+    # Clean markdown links: [text](url) -> text
+    result = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', result)
+
+    # Clean inline code
+    result = re.sub(r'`([^`]+)`', r'\1', result)
+
+    # Clean bold/italic
+    result = re.sub(r'\*\*([^*]+)\*\*', r'\1', result)
+    result = re.sub(r'\*([^*]+)\*', r'\1', result)
+
+    # Truncate
+    if len(result) > max_len:
+        result = result[:200] + '...'
+
+    return result
+
 # ─── HTML template helpers ────────────────────────────────────────────
 def _nav_links(active_page=None):
     """Generate the shared sidebar navigation links."""
@@ -291,8 +327,7 @@ def generate_index(posts, config, tabs):
     """Generate the home page with post list."""
     post_cards = ""
     for p in posts:
-        first_para = p['body'].strip().split('\n\n')[0]
-        excerpt = (first_para[:200] + '...') if len(first_para) > 200 else first_para
+        excerpt = clean_excerpt(p['body'])
         cats = ' &middot; '.join(
             f'<a href="/categories/{re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-")}/" class="category-link">{c}</a>'
             for c in p.get('categories', [])
@@ -331,14 +366,17 @@ def generate_index(posts, config, tabs):
                 <p class="hero-tagline">{config.get('tagline', '')}</p>
                 <div class="hero-stats">
                     <div class="stat">
+                        <a href="/archives/" class="stat-link">
                         <span class="stat-num">{len(posts)}</span>
-                        <span class="stat-label">Posts</span></div>
+                        <span class="stat-label">Posts</span></a></div>
                     <div class="stat">
+                        <a href="/categories/" class="stat-link">
                         <span class="stat-num">{cats_count}</span>
-                        <span class="stat-label">Categories</span></div>
+                        <span class="stat-label">Categories</span></a></div>
                     <div class="stat">
+                        <a href="/tags/" class="stat-link">
                         <span class="stat-num">{tags_count}</span>
-                        <span class="stat-label">Tags</span></div>
+                        <span class="stat-label">Tags</span></a></div>
                 </div>
             </div>
         </header>
@@ -398,9 +436,10 @@ def generate_tab_page(tab, posts, config):
         tags = collect_tags(posts)
         tag_html = '<div class="tag-cloud">'
         for tag, tag_posts in sorted(tags.items()):
+            tag_slug = re.sub(r'[^a-z0-9]+', '-', tag.lower()).strip('-')
             size = min(len(tag_posts) * 0.8 + 1, 2.5)
             tag_html += (
-                f'<a href="/tags/?tag={tag}" class="tag-pill" '
+                f'<a href="/tags/{tag_slug}/" class="tag-pill" '
                 f'style="font-size:{size}rem">'
                 f'{tag} <span>({len(tag_posts)})</span></a>'
             )
@@ -450,6 +489,37 @@ def generate_category_page(cat_name, cat_posts, config):
     full = full.replace(
         f"<title>{config['title']} | {config.get('tagline', '')}</title>",
         f"<title>{cat_name} | {config['title']}</title>",
+        1,
+    )
+    return full
+
+# ─── Generate tag page ──────────────────────────────────
+def generate_tag_page(tag_name, tag_posts, config):
+    """Generate a page listing posts for a specific tag."""
+    post_list_html = ''
+    for p in tag_posts:
+        post_list_html += f"""
+        <div class="category-post-item">
+            <span class="category-post-date">{p['date_display']}</span>
+            <a href="/posts/{p['slug']}/" class="category-post-title">{p.get('title', p['slug'])}</a>
+        </div>"""
+
+    main = f"""    <main class="container">
+        <div class="page">
+            <h1 class="page-title">Tag: {tag_name}</h1>
+            <div class="page-content">
+                <p class="category-intro">{len(tag_posts)} posts with this tag</p>
+                <div class="category-posts-list">{post_list_html}
+                </div>
+                <a href="/tags/" class="back-link">&larr; Back to tags</a>
+            </div>
+        </div>
+    </main>"""
+
+    full = _shell(config, main, 'tab')
+    full = full.replace(
+        f"<title>{config['title']} | {config.get('tagline', '')}</title>",
+        f"<title>{tag_name} | {config['title']}</title>",
         1,
     )
     return full
@@ -581,6 +651,17 @@ def main(args=None):
         cat_page_dir.mkdir(parents=True, exist_ok=True)
         (cat_page_dir / 'index.html').write_text(
             generate_category_page(cat, cat_posts, config), encoding='utf-8'
+        )
+
+    # Generate tag pages
+    print('Generating tag pages...')
+    tags = collect_tags(posts)
+    for tag, tag_posts in tags.items():
+        tag_slug = re.sub(r'[^a-z0-9]+', '-', tag.lower()).strip('-')
+        tag_page_dir = output / 'tags' / tag_slug
+        tag_page_dir.mkdir(parents=True, exist_ok=True)
+        (tag_page_dir / 'index.html').write_text(
+            generate_tag_page(tag, tag_posts, config), encoding='utf-8'
         )
 
     print(f'\nDone! Site generated at: {output}')
