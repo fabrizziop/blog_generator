@@ -148,10 +148,10 @@
         rotY: 0,
         rotZ: 0,
         // Constellation parameters
-        nodeCount: 40,
+        nodeCount: 100,
         radius: 300,
         depth: 150,
-        connectionDist: 200,
+        connectionDist: 250,
         // FPS cap — 30fps is plenty for ambient background
         frameInterval: 33,
 
@@ -178,7 +178,7 @@
             this.radius = Math.max(this.width, this.height) * 0.5;
             this.depth = this.radius * 0.5;
             // Mobile gets fewer nodes
-            this.nodeCount = this.isMobile() ? 20 : 40;
+            this.nodeCount = this.isMobile() ? 50 : 100;
             this.buildConstellation();
             this.spawnPackets();
         },
@@ -223,14 +223,14 @@
 
         spawnPackets() {
             this.packets = [];
-            const count = this.isMobile() ? 2 : 5;
+            const count = this.isMobile() ? 3 : 8;
             for (let i = 0; i < count && this.edges.length; i++) {
                 const edgeIdx = Math.floor(Math.random() * this.edges.length);
                 this.packets.push({
                     edge: edgeIdx,
                     t: Math.random(),
-                    speed: 0.003 + Math.random() * 0.004,
-                    size: 2 + Math.random() * 2,
+                    speed: 0.002 + Math.random() * 0.003,
+                    size: 2.5 + Math.random() * 2.5,
                 });
             }
         },
@@ -344,7 +344,7 @@
             }
 
             // Draw edges — flat color, no gradients
-            const edgeAlpha = document.documentElement.getAttribute('data-theme') !== 'light' ? 0.12 : 0.4;
+            const edgeAlpha = document.documentElement.getAttribute('data-theme') !== 'light' ? 0.2 : 0.5;
             for (const edge of this.edges) {
                 const pa = projected[edge.a];
                 const pb = projected[edge.b];
@@ -356,19 +356,19 @@
                 this.ctx.moveTo(pa.x, pa.y);
                 this.ctx.lineTo(pb.x, pb.y);
                 this.ctx.strokeStyle = `rgba(${c}, ${alpha})`;
-                this.ctx.lineWidth = Math.max(0.3, 0.8 * pa.scale);
+                this.ctx.lineWidth = Math.max(0.4, 1.2 * pa.scale);
                 this.ctx.stroke();
             }
 
             // Draw nodes — shadowBlur for glow instead of radial gradients
-            const nodeAlpha = document.documentElement.getAttribute('data-theme') !== 'light' ? 0.6 : 0.8;
+            const nodeAlpha = document.documentElement.getAttribute('data-theme') !== 'light' ? 0.7 : 0.9;
             this.ctx.shadowColor = `rgba(${c}, 0.5)`;
-            this.ctx.shadowBlur = 8;
+            this.ctx.shadowBlur = 12;
             for (let i = 0; i < this.nodes.length; i++) {
                 const node = this.nodes[i];
                 const p = projected[i];
                 const pulseFactor = Math.sin(node.pulse) * 0.3 + 0.7;
-                const r = Math.max(0.5, node.radius * p.scale * pulseFactor);
+                const r = Math.max(0.8, node.radius * p.scale * pulseFactor);
                 const depthFade = Math.max(0.1, 1 - (node.z + this.depth) / (this.depth * 2));
                 const alpha = depthFade * nodeAlpha * pulseFactor;
 
