@@ -127,7 +127,7 @@
         }
     };
 
-    // ─── 3D Rotating Mesh Background (Canvas) ────────────
+    // ─── 3D Constellation Background (Canvas, low-complexity) ──
     const Network3D = {
         canvas: null,
         ctx: null,
@@ -142,25 +142,29 @@
         targetRotZ: 0,
         animId: null,
         time: 0,
+        lastFrameTime: 0,
         rotationSpeed: 0.001,
         rotX: 0,
         rotY: 0,
         rotZ: 0,
-        // Mesh parameters
-        rings: 12,
-        segments: 20,
-        radius: 250,
-        depth: 120,
-        // Visual parameters
-        connectionDist: 300,
-        glowIntensity: 0.6,
+        // Constellation parameters
+        nodeCount: 40,
+        radius: 300,
+        depth: 150,
+        connectionDist: 200,
+        // FPS cap — 30fps is plenty for ambient background
+        frameInterval: 33,
+
+        isMobile() {
+            return window.innerWidth < 768 || 'ontouchstart' in window;
+        },
 
         init() {
             this.canvas = document.getElementById('bg-canvas');
             if (!this.canvas) return;
             this.ctx = this.canvas.getContext('2d');
             this.resize();
-            this.buildMesh();
+            this.buildConstellation();
             this.spawnPackets();
             this.bindEvents();
             this.animate();
@@ -171,37 +175,37 @@
             this.height = window.innerHeight;
             this.canvas.width = this.width;
             this.canvas.height = this.height;
-            this.radius = Math.max(this.width, this.height) * 0.6;
-            this.depth = this.radius * 0.4;
-            this.buildMesh();
+            this.radius = Math.max(this.width, this.height) * 0.5;
+            this.depth = this.radius * 0.5;
+            // Mobile gets fewer nodes
+            this.nodeCount = this.isMobile() ? 20 : 40;
+            this.buildConstellation();
+            this.spawnPackets();
         },
 
-        buildMesh() {
+        buildConstellation() {
             this.nodes = [];
             this.edges = [];
 
-            // Create a toroidal mesh — nodes arranged in rings
-            for (let r = 0; r < this.rings; r++) {
-                const ringAngle = (r / this.rings) * Math.PI * 2;
-                const ringRadius = this.radius * (0.6 + 0.4 * Math.sin(ringAngle * 0.5));
-                for (let s = 0; s < this.segments; s++) {
-                    const segAngle = (s / this.segments) * Math.PI * 2;
-                    const x = Math.cos(segAngle) * ringRadius;
-                    const y = Math.sin(segAngle) * ringRadius * 0.6; // Flatten vertically
-                    const z = Math.sin(ringAngle) * this.depth;
-                    this.nodes.push({
-                        ox: x, oy: y, oz: z, // Original positions
-                        x: 0, y: 0, z: 0,     // Transformed positions
-                        ring: r,
-                        seg: s,
-                        pulse: Math.random() * Math.PI * 2,
-                        pulseSpeed: 0.015 + Math.random() * 0.02,
-                        radius: 1 + Math.random() * 1.5,
-                    });
-                }
+            // Scatter nodes in a sphere — Fibonacci distribution for even spread
+            const phi = Math.PI * (3 - Math.sqrt(5)); // Golden angle
+            for (let i = 0; i < this.nodeCount; i++) {
+                const y = 1 - (i / (this.nodeCount - 1)) * 2; // -1 to 1
+                const radiusAtY = Math.sqrt(1 - y * y);
+                const theta = phi * i;
+                const x = Math.cos(theta) * radiusAtY;
+                const z = Math.sin(theta) * radiusAtY;
+                this.nodes.push({
+                    ox: x * this.radius,
+                    oy: y * this.radius * 0.5,
+                    oz: z * this.depth,
+                    pulse: Math.random() * Math.PI * 2,
+                    pulseSpeed: 0.01 + Math.random() * 0.015,
+                    radius: 1 + Math.random() * 1.5,
+                });
             }
 
-            // Create edges between nearby nodes
+            // Connect nearby nodes — O(n²) but n is small (20-40)
             for (let i = 0; i < this.nodes.length; i++) {
                 for (let j = i + 1; j < this.nodes.length; j++) {
                     const a = this.nodes[i];
@@ -211,7 +215,7 @@
                     const dz = a.oz - b.oz;
                     const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                     if (dist < this.connectionDist) {
-                        this.edges.push({ a: i, b: j, dist, distNorm: dist / this.connectionDist });
+                        this.edges.push({ a: i, b: j, distNorm: dist / this.connectionDist });
                     }
                 }
             }
@@ -219,13 +223,14 @@
 
         spawnPackets() {
             this.packets = [];
-            for (let i = 0; i < 15; i++) {
+            const count = this.isMobile() ? 2 : 5;
+            for (let i = 0; i < count && this.edges.length; i++) {
                 const edgeIdx = Math.floor(Math.random() * this.edges.length);
                 this.packets.push({
                     edge: edgeIdx,
                     t: Math.random(),
-                    speed: 0.003 + Math.random() * 0.005,
-                    size: 2 + Math.random() * 3,
+                    speed: 0.003 + Math.random() * 0.004,
+                    size: 2 + Math.random() * 2,
                 });
             }
         },
@@ -233,46 +238,42 @@
         bindEvents() {
             window.addEventListener('resize', () => {
                 this.resize();
-                this.spawnPackets();
             });
-            window.addEventListener('mousemove', (e) => {
-                this.mouse.x = e.clientX;
-                this.mouse.y = e.clientY;
-                this.mouse.active = true;
-                // Strong mouse influence — mesh tilts toward cursor
-                const mx = (e.clientX - this.width / 2) / (this.width / 2);
-                const my = (e.clientY - this.height / 2) / (this.height / 2);
-                this.targetRotY = mx * 0.8;
-                this.targetRotX = my * 0.5;
-                this.targetRotZ = mx * 0.2;
-            });
-            window.addEventListener('mouseleave', () => {
-                this.mouse.active = false;
-                this.targetRotX = 0;
-                this.targetRotY = 0;
-                this.targetRotZ = 0;
-            });
+            // Skip mouse tracking on mobile
+            if (!this.isMobile()) {
+                window.addEventListener('mousemove', (e) => {
+                    this.mouse.x = e.clientX;
+                    this.mouse.y = e.clientY;
+                    this.mouse.active = true;
+                    const mx = (e.clientX - this.width / 2) / (this.width / 2);
+                    const my = (e.clientY - this.height / 2) / (this.height / 2);
+                    this.targetRotY = mx * 0.5;
+                    this.targetRotX = my * 0.3;
+                });
+                window.addEventListener('mouseleave', () => {
+                    this.mouse.active = false;
+                    this.targetRotX = 0;
+                    this.targetRotY = 0;
+                });
+            }
         },
 
         rotatePoint(x, y, z) {
-            // Rotate around Y axis
-            let cosY = Math.cos(this.rotY);
-            let sinY = Math.sin(this.rotY);
-            let x1 = x * cosY - z * sinY;
-            let z1 = x * sinY + z * cosY;
-
-            // Rotate around X axis
-            let cosX = Math.cos(this.rotX);
-            let sinX = Math.sin(this.rotX);
-            let y1 = y * cosX - z1 * sinX;
-            let z2 = y * sinX + z1 * cosX;
-
-            // Rotate around Z axis
-            let cosZ = Math.cos(this.rotZ);
-            let sinZ = Math.sin(this.rotZ);
-            let x2 = x1 * cosZ - y1 * sinZ;
-            let y2 = x1 * sinZ + y1 * cosZ;
-
+            // Y rotation
+            const cosY = Math.cos(this.rotY);
+            const sinY = Math.sin(this.rotY);
+            const x1 = x * cosY - z * sinY;
+            const z1 = x * sinY + z * cosY;
+            // X rotation
+            const cosX = Math.cos(this.rotX);
+            const sinX = Math.sin(this.rotX);
+            const y1 = y * cosX - z1 * sinX;
+            const z2 = y * sinX + z1 * cosX;
+            // Z rotation
+            const cosZ = Math.cos(this.rotZ);
+            const sinZ = Math.sin(this.rotZ);
+            const x2 = x1 * cosZ - y1 * sinZ;
+            const y2 = x1 * sinZ + y1 * cosZ;
             return { x: x2, y: y2, z: z2 };
         },
 
@@ -291,30 +292,35 @@
         getColor() {
             const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
             if (isDark) {
-                return { r: 0, g: 212, b: 255, alt: { r: 123, g: 47, b: 247 } };
+                return { r: 0, g: 212, b: 255 };
             }
-            return { r: 0, g: 60, b: 120, alt: { r: 50, g: 10, b: 120 } };
+            return { r: 0, g: 60, b: 120 };
         },
 
-        animate() {
+        animate(timestamp) {
+            // FPS cap — skip frames we don't need
+            if (timestamp - this.lastFrameTime < this.frameInterval) {
+                this.animId = requestAnimationFrame((t) => this.animate(t));
+                return;
+            }
+            this.lastFrameTime = timestamp;
+
             this.time += 0.016;
 
-            // Auto-rotation (slow, ambient)
+            // Auto-rotation
             this.rotY += this.rotationSpeed;
 
-            // Smooth easing toward mouse-driven targets
+            // Smooth easing toward mouse targets
             const ease = 0.04;
             this.rotX += (this.targetRotX - this.rotX) * ease;
             this.rotY += (this.targetRotY - this.rotY) * ease - this.rotationSpeed;
-            this.rotZ += (this.targetRotZ - this.rotZ) * ease;
+            this.rotZ += (Math.cos(this.time * 0.2) * 0.08 - this.rotZ) * ease;
 
-            // Add gentle ambient oscillation on top
-            const ambientX = Math.sin(this.time * 0.3) * 0.15;
-            const ambientZ = Math.cos(this.time * 0.2) * 0.08;
-            const finalRotX = this.rotX + ambientX;
-            const finalRotZ = this.rotZ + ambientZ;
+            // Ambient oscillation
+            const finalRotX = this.rotX + Math.sin(this.time * 0.3) * 0.15;
+            const finalRotZ = this.rotZ + Math.cos(this.time * 0.25) * 0.1;
 
-            // Temporarily swap rotation values for transform
+            // Temporarily override rotation for this frame
             const savedRotX = this.rotX;
             const savedRotZ = this.rotZ;
             this.rotX = finalRotX;
@@ -322,164 +328,83 @@
 
             this.ctx.clearRect(0, 0, this.width, this.height);
 
-            const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
             const color = this.getColor();
-            const baseColor = `${color.r}, ${color.g}, ${color.b}`;
-            const altColor = `${color.alt.r}, ${color.alt.g}, ${color.alt.b}`;
+            const c = `${color.r}, ${color.g}, ${color.b}`;
 
-            // Mouse normalized position for node displacement
-            const mouseNX = this.mouse.x / this.width;
-            const mouseNY = this.mouse.y / this.height;
-
-            // Transform all nodes
+            // Transform + project all nodes
+            const projected = [];
             for (const node of this.nodes) {
                 const rotated = this.rotatePoint(node.ox, node.oy, node.oz);
-                // Add wave distortion
-                const wave = Math.sin(this.time * 2 + node.ring * 0.5) * 15;
+                const wave = Math.sin(this.time * 1.5 + node.ox * 0.005) * 10;
                 node.x = rotated.x;
                 node.y = rotated.y + wave;
                 node.z = rotated.z;
                 node.pulse += node.pulseSpeed;
+                projected.push(this.project(node.x, node.y, node.z));
             }
 
-            // Project all nodes
-            const projected = this.nodes.map(n => this.project(n.x, n.y, n.z));
-
-            // Mouse-reactive node displacement
-            if (this.mouse.active) {
-                for (let i = 0; i < projected.length; i++) {
-                    const p = projected[i];
-                    const dx = p.x - this.mouse.x;
-                    const dy = p.y - this.mouse.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    const influenceRadius = 200;
-                    if (dist < influenceRadius) {
-                        const force = (1 - dist / influenceRadius) * 30;
-                        const angle = Math.atan2(dy, dx);
-                        p.x += Math.cos(angle) * force;
-                        p.y += Math.sin(angle) * force;
-                        // Boost pulse near mouse
-                        this.nodes[i].pulse += 0.1;
-                    }
-                }
-            }
-
-            // Draw edges with depth-based opacity
+            // Draw edges — flat color, no gradients
+            const edgeAlpha = document.documentElement.getAttribute('data-theme') !== 'light' ? 0.12 : 0.4;
             for (const edge of this.edges) {
                 const pa = projected[edge.a];
                 const pb = projected[edge.b];
                 const avgZ = (this.nodes[edge.a].z + this.nodes[edge.b].z) / 2;
                 const depthFade = Math.max(0.05, 1 - (avgZ + this.depth) / (this.depth * 2));
-
-                // Gradient along edge
-                const gradient = this.ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
-                const nodeA = this.nodes[edge.a];
-                const nodeB = this.nodes[edge.b];
-                const pulseA = Math.sin(nodeA.pulse) * 0.3 + 0.7;
-                const pulseB = Math.sin(nodeB.pulse) * 0.3 + 0.7;
-
-                // Boost opacity in light theme
-                const edgeMult = isDark ? 0.15 : 0.5;
-                const midMult = isDark ? 0.1 : 0.35;
-
-                gradient.addColorStop(0, `rgba(${baseColor}, ${depthFade * edgeMult * pulseA})`);
-                gradient.addColorStop(0.5, `rgba(${altColor}, ${depthFade * midMult * (pulseA + pulseB) / 2})`);
-                gradient.addColorStop(1, `rgba(${baseColor}, ${depthFade * edgeMult * pulseB})`);
+                const alpha = depthFade * edgeAlpha;
 
                 this.ctx.beginPath();
                 this.ctx.moveTo(pa.x, pa.y);
                 this.ctx.lineTo(pb.x, pb.y);
-                this.ctx.strokeStyle = gradient;
-                this.ctx.lineWidth = Math.max(0.3, 1 * pa.scale * (1 - edge.distNorm * 0.5));
+                this.ctx.strokeStyle = `rgba(${c}, ${alpha})`;
+                this.ctx.lineWidth = Math.max(0.3, 0.8 * pa.scale);
                 this.ctx.stroke();
             }
 
-            // Draw nodes sorted by depth (back to front)
-            const sortedIndices = this.nodes
-                .map((n, i) => ({ i, z: n.z }))
-                .sort((a, b) => b.z - a.z);
-
-            for (const { i } of sortedIndices) {
+            // Draw nodes — shadowBlur for glow instead of radial gradients
+            const nodeAlpha = document.documentElement.getAttribute('data-theme') !== 'light' ? 0.6 : 0.8;
+            this.ctx.shadowColor = `rgba(${c}, 0.5)`;
+            this.ctx.shadowBlur = 8;
+            for (let i = 0; i < this.nodes.length; i++) {
                 const node = this.nodes[i];
                 const p = projected[i];
-                const pulseFactor = Math.sin(node.pulse) * 0.4 + 0.6;
-                const radius = node.radius * p.scale * pulseFactor;
+                const pulseFactor = Math.sin(node.pulse) * 0.3 + 0.7;
+                const r = Math.max(0.5, node.radius * p.scale * pulseFactor);
                 const depthFade = Math.max(0.1, 1 - (node.z + this.depth) / (this.depth * 2));
+                const alpha = depthFade * nodeAlpha * pulseFactor;
 
-                // Outer glow
-                const glowRadius = radius * 6;
-                const glow = this.ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
-                const glowMult = isDark ? 1 : 1.5;
-                glow.addColorStop(0, `rgba(${baseColor}, ${0.3 * glowMult * depthFade * pulseFactor})`);
-                glow.addColorStop(0.5, `rgba(${altColor}, ${0.1 * glowMult * depthFade * pulseFactor})`);
-                glow.addColorStop(1, `rgba(${baseColor}, 0)`);
                 this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
-                this.ctx.fillStyle = glow;
-                this.ctx.fill();
-
-                // Core dot
-                this.ctx.beginPath();
-                this.ctx.arc(p.x, p.y, Math.max(0.5, radius), 0, Math.PI * 2);
-                this.ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * depthFade * pulseFactor})`;
+                this.ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+                this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
                 this.ctx.fill();
             }
+            this.ctx.shadowBlur = 0;
 
-            // Draw animated data packets
-            this.drawPackets(projected, color);
-
-            // Restore rotation values
-            this.rotX = savedRotX;
-            this.rotZ = savedRotZ;
-
-            this.animId = requestAnimationFrame(() => this.animate());
-        },
-
-        drawPackets(projected, color) {
+            // Draw packets — simple dots, no gradient trails
             for (const packet of this.packets) {
                 packet.t += packet.speed;
                 if (packet.t > 1) {
                     packet.t = 0;
                     packet.edge = Math.floor(Math.random() * this.edges.length);
                 }
-
                 const edge = this.edges[packet.edge];
                 const pa = projected[edge.a];
                 const pb = projected[edge.b];
-
-                // Interpolate position
                 const x = pa.x + (pb.x - pa.x) * packet.t;
                 const y = pa.y + (pb.y - pa.y) * packet.t;
-                const avgScale = (pa.scale + pb.scale) / 2;
-                const size = packet.size * avgScale;
-
-                // Trail effect
-                const trailLen = 0.08;
-                const tx = pa.x + (pb.x - pa.x) * Math.max(0, packet.t - trailLen);
-                const ty = pa.y + (pb.y - pa.y) * Math.max(0, packet.t - trailLen);
-
-                const trail = this.ctx.createLinearGradient(tx, ty, x, y);
-                trail.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
-                trail.addColorStop(1, `rgba(255, 255, 255, 0.8)`);
+                const size = packet.size * ((pa.scale + pb.scale) / 2);
 
                 this.ctx.beginPath();
-                this.ctx.moveTo(tx, ty);
-                this.ctx.lineTo(x, y);
-                this.ctx.strokeStyle = trail;
-                this.ctx.lineWidth = size * 0.5;
-                this.ctx.stroke();
-
-                // Bright head
-                const headGlow = this.ctx.createRadialGradient(x, y, 0, x, y, size * 3);
-                headGlow.addColorStop(0, `rgba(255, 255, 255, 0.9)`);
-                headGlow.addColorStop(0.3, `rgba(${color.r}, ${color.g}, ${color.b}, 0.5)`);
-                headGlow.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
-                this.ctx.beginPath();
-                this.ctx.arc(x, y, size * 3, 0, Math.PI * 2);
-                this.ctx.fillStyle = headGlow;
+                this.ctx.arc(x, y, size, 0, Math.PI * 2);
+                this.ctx.fillStyle = `rgba(255, 255, 255, 0.8)`;
                 this.ctx.fill();
             }
-        }
+
+            // Restore rotation
+            this.rotX = savedRotX;
+            this.rotZ = savedRotZ;
+
+            this.animId = requestAnimationFrame((t) => this.animate(t));
+        },
     };
 
     // ─── Typing Effect for Hero ──────────────────────────
