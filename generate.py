@@ -11,6 +11,8 @@ Usage:
 """
 
 import argparse
+import html as html_module
+import json
 import os
 import re
 import shutil
@@ -19,7 +21,7 @@ from pathlib import Path
 
 import yaml
 import markdown
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pygments import highlight
 from pygments.lexers import get_lexer_by_name, TextLexer
@@ -193,6 +195,51 @@ def clean_excerpt(text, max_len=200):
 
     return result
 
+# ─── Reading time ────────────────────────────────────────
+def reading_time(text):
+    """Estimate reading time in minutes from raw markdown text."""
+    words = len(text.split())
+    return max(1, round(words / 200))
+
+# ─── Extract TOC from rendered HTML ──────────────────────
+def extract_toc(html_body):
+    """Extract h2/h3 headings from rendered HTML for a table of contents."""
+    headings = re.findall(r'<h([23])[^>]*>(.*?)</h\1>', html_body, re.DOTALL)
+    toc = []
+    for level, raw_text in headings:
+        # Strip inner HTML tags, keep text
+        text = re.sub(r'<[^>]+>', '', raw_text).strip()
+        if not text:
+            continue
+        slug = re.sub(r'[^a-z0-9]+', '-', text.lower().strip('-'))[:60]
+        toc.append({'level': int(level), 'text': text, 'slug': slug})
+    # Add id attributes to headings in the HTML so TOC links work
+    for item in toc:
+        pattern = f'<h{item["level"]}[^>]*>{html_module.escape(item["text"])}</h{item["level"]}>'
+        if pattern in html_body:
+            html_body = html_body.replace(
+                pattern,
+                f'<h{item["level"]} id="{item["slug"]}">{html_module.escape(item["text"])}</h{item["level"]}>'
+            )
+    return toc, html_body
+
+# ─── Related posts ───────────────────────────────────────
+def related_posts(post, all_posts, limit=3):
+    """Find related posts by shared categories and tags."""
+    post_cats = set(post.get('categories', []))
+    post_tags = set(post.get('tags', []))
+    scored = []
+    for p in all_posts:
+        if p['slug'] == post['slug']:
+            continue
+        shared_cats = len(post_cats & set(p.get('categories', [])))
+        shared_tags = len(post_tags & set(p.get('tags', [])))
+        score = shared_cats * 2 + shared_tags  # Categories weighted higher
+        if score > 0:
+            scored.append((score, p))
+    scored.sort(key=lambda x: (-x[0], x[1]['date']))
+    return [p for _, p in scored[:limit]]
+
 # ─── HTML template helpers ────────────────────────────────────────────
 def _nav_links(active_page=None):
     """Generate the shared sidebar navigation links."""
@@ -243,16 +290,37 @@ def _sidebar(config, active_page=None):
         </div>
     </nav>"""
 
-def _shell(config, body_html, page_type='home'):
+def _shell(config, body_html, page_type='home', page_meta=None):
     """Wrap body content in the full HTML document shell."""
+    page_meta = page_meta or {}
     sidebar = _sidebar(config, page_type)
+    title = page_meta.get('title', f"{config['title']} | {config.get('tagline', '')}")
+    description = page_meta.get('description', config.get('description', config.get('tagline', '')))
+    site_url = config.get('url', '').rstrip('/')
+    og_image = page_meta.get('og_image', f'{site_url}/assets/img/og.png')
+
+    # Build OG + Twitter meta tags
+    meta_tags = (
+        f'    <meta name="description" content="{html_module.escape(description)}">\n'
+        f'    <meta property="og:type" content="website">\n'
+        f'    <meta property="og:url" content="{site_url}{page_meta.get("url", "")}">\n'
+        f'    <meta property="og:title" content="{html_module.escape(title)}">\n'
+        f'    <meta property="og:description" content="{html_module.escape(description)}">\n'
+        f'    <meta property="og:image" content="{og_image}">\n'
+        f'    <meta name="twitter:card" content="summary_large_image">\n'
+        f'    <meta name="twitter:title" content="{html_module.escape(title)}">\n'
+        f'    <meta name="twitter:description" content="{html_module.escape(description)}">\n'
+        f'    <meta name="twitter:image" content="{og_image}">\n'
+        f'    <link rel="alternate" type="application/atom+xml" title="RSS Feed" href="/feed.xml">\n'
+    )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{config['title']} | {config.get('tagline', '')}</title>
-    <meta name="description" content="{config.get('description', config.get('tagline', ''))}">
+    <title>{title}</title>
+{meta_tags}
     <link rel="stylesheet" href="/css/style.css">
     <link rel="icon" href="/assets/img/favicon.ico" type="image/x-icon">
 </head>
@@ -264,10 +332,19 @@ def _shell(config, body_html, page_type='home'):
     <button id="menuToggle" class="menu-toggle" aria-label="Toggle menu">
         <span></span><span></span><span></span>
     </button>
+    <button id="searchToggle" class="search-toggle" aria-label="Search">&#128269;</button>
     <button id="themeToggle" class="theme-toggle" aria-label="Toggle theme">
         <span class="theme-icon">&#9728;</span>
     </button>
     <button id="backToTop" class="back-to-top" aria-label="Back to top">&#8593;</button>
+
+    <!-- Search overlay -->
+    <div id="searchOverlay" class="search-overlay">
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search posts..." autocomplete="off">
+            <div id="searchResults" class="search-results"></div>
+        </div>
+    </div>
 {body_html}
     <footer class="site-footer">
         <p>&copy; {datetime.now().year}
@@ -279,11 +356,16 @@ def _shell(config, body_html, page_type='home'):
 </html>"""
 
 # ─── Generate pages ───────────────────────────────────────────────────
-def generate_post_page(post, config):
+def generate_post_page(post, config, all_posts):
     """Generate HTML for a single post."""
     html_body = render_md(post['body'])
     slug = post['slug']
     title = post.get('title', slug)
+    rt = reading_time(post['body'])
+
+    # Extract TOC and inject heading ids
+    toc, html_body = extract_toc(html_body)
+
     cats = ' &middot; '.join(
         f'<a href="/categories/{re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-")}/" class="category-link">{c}</a>'
         for c in post.get('categories', [])
@@ -292,11 +374,42 @@ def generate_post_page(post, config):
         f'<span class="tag">{t}</span>' for t in post.get('tags', [])
     )
 
+    # Build TOC HTML
+    toc_html = ''
+    if toc:
+        toc_items = ''.join(
+            f'<li class="toc-h{item["level"]}"><a href="#{item["slug"]}">{item["text"]}</a></li>'
+            for item in toc
+        )
+        toc_html = f"""            <aside class="post-toc">
+                <h3 class="toc-title">On this page</h3>
+                <nav class="toc-nav">{toc_items}
+                </nav>
+            </aside>"""
+
+    # Build related posts HTML
+    rel = related_posts(post, all_posts)
+    related_html = ''
+    if rel:
+        rel_items = ''.join(
+            f'<a href="/posts/{p["slug"]}/" class="related-card">'
+            f'<span class="related-date">{p["date_display"]}</span>'
+            f'<span class="related-title">{p.get("title", p["slug"])}</span>'
+            f'</a>' for p in rel
+        )
+        related_html = f"""            <section class="related-posts">
+                <h3>Related posts</h3>
+                <div class="related-grid">{rel_items}
+                </div>
+            </section>"""
+
     main = f"""    <main class="container">
         <article class="post">
+            {toc_html}
             <header class="post-header">
                 <div class="post-meta-top">
                     <span class="post-date">{post['date_display']}</span>
+                    <span class="post-reading-time">{rt} min read</span>
                     <span class="post-categories">{cats}</span>
                 </div>
                 <h1 class="post-title">{title}</h1>
@@ -310,17 +423,20 @@ def generate_post_page(post, config):
                     <a href="/" class="back-link">&larr; Back to posts</a>
                 </div>
             </footer>
+            {related_html}
         </article>
     </main>"""
 
-    # Override <title> for posts
-    full = _shell(config, main, 'post')
-    full = full.replace(
-        f"<title>{config['title']} | {config.get('tagline', '')}</title>",
-        f"<title>{title} | {config['title']}</title>",
-        1,
-    )
-    return full
+    # Excerpt for meta description
+    excerpt = clean_excerpt(post['body'], max_len=160)
+
+    page_meta = {
+        'title': f'{title} | {config["title"]}',
+        'description': excerpt,
+        'url': f'/posts/{slug}/',
+    }
+
+    return _shell(config, main, 'post', page_meta)
 
 
 def generate_index(posts, config, tabs):
@@ -328,6 +444,7 @@ def generate_index(posts, config, tabs):
     post_cards = ""
     for p in posts:
         excerpt = clean_excerpt(p['body'])
+        rt = reading_time(p['body'])
         cats = ' &middot; '.join(
             f'<a href="/categories/{re.sub(r"[^a-z0-9]+", "-", c.lower()).strip("-")}/" class="category-link">{c}</a>'
             for c in p.get('categories', [])
@@ -338,6 +455,7 @@ def generate_index(posts, config, tabs):
             <div class="card-content">
                 <div class="card-meta">
                     <span class="card-date">{p['date_display']}</span>
+                    <span class="card-reading-time">{rt} min read</span>
                     <span class="card-categories">{cats}</span>
                 </div>
                 <h2 class="card-title">
@@ -524,6 +642,88 @@ def generate_tag_page(tag_name, tag_posts, config):
     )
     return full
 
+# ─── Generate sitemap.xml ───────────────────────────────
+def generate_sitemap(posts, config):
+    """Generate sitemap.xml for search engines."""
+    site_url = config.get('url', '').rstrip('/')
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    # Static pages
+    static = ['/', '/archives/', '/categories/', '/tags/', '/about/', '/peering/', '/graphs/']
+    for path in static:
+        lines.append(f'  <url><loc>{site_url}{path}</loc></url>')
+    # Posts
+    for p in posts:
+        loc = f'{site_url}/posts/{p["slug"]}/'
+        lastmod = p['date_str']
+        lines.append(f'  <url><loc>{loc}</loc><lastmod>{lastmod}</lastmod></url>')
+    # Category pages
+    cats = collect_categories(posts)
+    for cat in cats:
+        cat_slug = re.sub(r'[^a-z0-9]+', '-', cat.lower()).strip('-')
+        lines.append(f'  <url><loc>{site_url}/categories/{cat_slug}/</loc></url>')
+    # Tag pages
+    tags = collect_tags(posts)
+    for tag in tags:
+        tag_slug = re.sub(r'[^a-z0-9]+', '-', tag.lower()).strip('-')
+        lines.append(f'  <url><loc>{site_url}/tags/{tag_slug}/</loc></url>')
+    lines.append('</urlset>')
+    return '\n'.join(lines)
+
+# ─── Generate RSS feed (Atom) ───────────────────────────
+def _atom_date(dt):
+    """Format a datetime for Atom feed (ISO 8601 with timezone)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.strftime('%Y-%m-%dT%H:%M:%S%z')
+
+def generate_atom_feed(posts, config):
+    """Generate an Atom feed (RSS) for the blog."""
+    site_url = config.get('url', '').rstrip('/')
+    site_title = config['title']
+    lines = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<feed xmlns="http://www.w3.org/2005/Atom">',
+        f'  <title>{html_module.escape(site_title)}</title>',
+        f'  <subtitle>{html_module.escape(config.get("tagline", ""))}</subtitle>',
+        f'  <link href="{site_url}/" rel="alternate"/>',
+        f'  <link href="{site_url}/feed.xml" rel="self"/>',
+        f'  <id>{site_url}/</id>',
+        f'  <updated>{_atom_date(posts[0]["date"]) if posts else ""}</updated>',
+    ]
+    for p in posts:
+        excerpt = clean_excerpt(p['body'], max_len=160)
+        slug = p['slug']
+        link = f'{site_url}/posts/{slug}/'
+        lines.append('  <entry>')
+        lines.append(f'    <title>{html_module.escape(p.get("title", slug))}</title>')
+        lines.append(f'    <link href="{link}" rel="alternate"/>')
+        lines.append(f'    <id>{link}</id>')
+        lines.append(f'    <updated>{_atom_date(p["date"])}</updated>')
+        lines.append(f'    <summary>{html_module.escape(excerpt)}</summary>')
+        lines.append(f'    <content type="html">{html_module.escape(clean_excerpt(p["body"], max_len=500))}</content>')
+        lines.append('  </entry>')
+    lines.append('</feed>')
+    return '\n'.join(lines)
+
+# ─── Generate search index ──────────────────────────────
+def generate_search_index(posts):
+    """Generate a JSON search index for client-side search."""
+    index = []
+    for p in posts:
+        index.append({
+            'slug': p['slug'],
+            'title': p.get('title', p['slug']),
+            'date': p['date_str'],
+            'categories': p.get('categories', []),
+            'tags': p.get('tags', []),
+            'excerpt': clean_excerpt(p['body'], max_len=300),
+            'body': clean_excerpt(p['body'], max_len=2000),
+        })
+    return json.dumps(index, ensure_ascii=False)
+
 # ─── CLI ───────────────────────────────────────────────────────────────
 def parse_args():
     """Parse command-line arguments."""
@@ -632,7 +832,7 @@ def main(args=None):
         post_dir = output / 'posts' / p['slug']
         post_dir.mkdir(parents=True, exist_ok=True)
         (post_dir / 'index.html').write_text(
-            generate_post_page(p, config), encoding='utf-8'
+            generate_post_page(p, config, posts), encoding='utf-8'
         )
 
     # Generate tab pages
@@ -674,6 +874,24 @@ def main(args=None):
         f'Disallow: /norobots/\n\n'
         f'Sitemap: {site_url}/sitemap.xml\n',
         encoding='utf-8',
+    )
+
+    # Generate sitemap.xml
+    print('Generating sitemap.xml...')
+    (output / 'sitemap.xml').write_text(
+        generate_sitemap(posts, config), encoding='utf-8'
+    )
+
+    # Generate RSS feed (Atom)
+    print('Generating feed.xml...')
+    (output / 'feed.xml').write_text(
+        generate_atom_feed(posts, config), encoding='utf-8'
+    )
+
+    # Generate search index
+    print('Generating search index...')
+    (output / 'search-index.json').write_text(
+        generate_search_index(posts), encoding='utf-8'
     )
 
     # Generate llms.txt

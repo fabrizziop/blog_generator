@@ -473,12 +473,114 @@
                     e.preventDefault();
                     Sidebar.toggleFn();
                 }
+                // Ctrl+Slash or Cmd+K to toggle search
+                if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+                    e.preventDefault();
+                    Search.open();
+                }
                 // T to toggle theme
                 if (e.key === 't' && !e.ctrlKey && !e.metaKey &&
                     !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
                     Theme.toggle();
                 }
             });
+        }
+    };
+
+    // ─── Client-side Search ──────────────────────────────
+    const Search = {
+        overlay: null,
+        input: null,
+        results: null,
+        index: [],
+        debounceTimer: null,
+
+        init() {
+            this.overlay = document.getElementById('searchOverlay');
+            this.input = document.getElementById('searchInput');
+            this.results = document.getElementById('searchResults');
+            if (!this.overlay || !this.input) return;
+
+            // Load search index
+            fetch('/search-index.json')
+                .then(r => r.json())
+                .then(data => { this.index = data; })
+                .catch(() => {});
+
+            // Toggle button
+            document.getElementById('searchToggle')?.addEventListener('click', () => this.open());
+
+            // Close on overlay click (not on search box)
+            this.overlay.addEventListener('click', (e) => {
+                if (e.target === this.overlay) this.close();
+            });
+
+            // Close on Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && this.overlay.classList.contains('open')) {
+                    this.close();
+                }
+            });
+
+            // Input handler with debounce
+            this.input.addEventListener('input', () => {
+                clearTimeout(this.debounceTimer);
+                this.debounceTimer = setTimeout(() => this.search(this.input.value), 150);
+            });
+        },
+
+        open() {
+            this.overlay.classList.add('open');
+            this.input.value = '';
+            this.results.innerHTML = '';
+            setTimeout(() => this.input.focus(), 100);
+        },
+
+        close() {
+            this.overlay.classList.remove('open');
+            this.input.value = '';
+            this.results.innerHTML = '';
+        },
+
+        search(query) {
+            if (!query || query.length < 2) {
+                this.results.innerHTML = '';
+                return;
+            }
+
+            const q = query.toLowerCase();
+            const matches = this.index.filter(post => {
+                return post.title.toLowerCase().includes(q) ||
+                       post.excerpt.toLowerCase().includes(q) ||
+                       post.body.toLowerCase().includes(q) ||
+                       post.tags.some(t => t.toLowerCase().includes(q)) ||
+                       post.categories.some(c => c.toLowerCase().includes(q));
+            });
+
+            if (!matches.length) {
+                this.results.innerHTML = '<div class="search-no-results">No results found</div>';
+                return;
+            }
+
+            // Limit to 10 results
+            this.results.innerHTML = matches.slice(0, 10).map(post => {
+                // Highlight matching text in excerpt
+                const excerpt = this.highlight(post.excerpt, query);
+                return `<a href="/posts/${post.slug}/" class="search-result-item">
+                    <span class="search-result-title">${post.title}</span>
+                    <span class="search-result-meta">${post.date}${post.categories.length ? ' · ' + post.categories.join(', ') : ''}</span>
+                    <span class="search-result-excerpt">${excerpt}</span>
+                </a>`;
+            }).join('');
+        },
+
+        highlight(text, query) {
+            const idx = text.toLowerCase().indexOf(query.toLowerCase());
+            if (idx === -1) return text;
+            const before = text.substring(0, idx);
+            const match = text.substring(idx, idx + query.length);
+            const after = text.substring(idx + query.length);
+            return `${before}<mark style="background:var(--accent-glow);color:var(--accent);padding:0 2px;border-radius:2px">${match}</mark>${after}`;
         }
     };
 
@@ -540,6 +642,7 @@
         TypingEffect.init();
         Counter.init();
         Shortcuts.init();
+        Search.init();
         ImageLoader.init();
         EasterEgg.init();
     }
