@@ -487,6 +487,10 @@
         init() {
             const images = document.querySelectorAll('.post-content img, .page-content img');
             images.forEach(img => {
+                // Copy alt text to title so it shows as a hover tooltip
+                if (img.alt && !img.title) {
+                    img.title = img.alt;
+                }
                 img.style.opacity = '0';
                 img.style.transition = 'opacity 0.5s ease';
                 if (img.complete) {
